@@ -31,7 +31,7 @@ def log_prob_from_logits(x):
     return x - m - torch.log(torch.sum(torch.exp(x - m), dim=axis, keepdim=True))
 
 
-def discretized_mix_logistic_loss(x, l):
+def discretized_mix_logistic_loss(x, l, args):
     """ log-likelihood for mixture of discretized logistics, assumes the data has been rescaled to [-1,1] interval """
     # Pytorch ordering
     x = x.permute(0, 2, 3, 1)
@@ -51,7 +51,10 @@ def discretized_mix_logistic_loss(x, l):
     # here and below: getting the means and adjusting them based on preceding
     # sub-pixels
     x = x.contiguous()
-    x = x.unsqueeze(-1) + Variable(torch.zeros(xs + [nr_mix]).cuda(), requires_grad=False)
+    if(args.cuda):
+        x = x.unsqueeze(-1) + Variable(torch.zeros(xs + [nr_mix]).cuda(), requires_grad=False)
+    else:
+        x = x.unsqueeze(-1) + Variable(torch.zeros(xs + [nr_mix]), requires_grad=False)
     m2 = (means[:, :, :, 1, :] + coeffs[:, :, :, 0, :]
                 * x[:, :, :, 0, :]).view(xs[0], xs[1], xs[2], 1, nr_mix)
 
@@ -95,11 +98,12 @@ def discretized_mix_logistic_loss(x, l):
     cond             = (x < -0.999).float()
     log_probs        = cond * log_cdf_plus + (1. - cond) * inner_out
     log_probs        = torch.sum(log_probs, dim=3) + log_prob_from_logits(logit_probs)
-    
-    return -torch.sum(log_sum_exp(log_probs))
+    print("Loss output : ", log_probs.shape)
+    return -torch.sum(log_sum_exp(log_probs), axis=)
+    # return -torch.sum(log_sum_exp(log_probs))
 
 
-def discretized_mix_logistic_loss_1d(x, l):
+def discretized_mix_logistic_loss_1d(x, l, args):
     """ log-likelihood for mixture of discretized logistics, assumes the data has been rescaled to [-1,1] interval """
     # Pytorch ordering
     x = x.permute(0, 2, 3, 1)
@@ -116,7 +120,10 @@ def discretized_mix_logistic_loss_1d(x, l):
     # here and below: getting the means and adjusting them based on preceding
     # sub-pixels
     x = x.contiguous()
-    x = x.unsqueeze(-1) + Variable(torch.zeros(xs + [nr_mix]).cuda(), requires_grad=False)
+    if(args.cuda):
+        x = x.unsqueeze(-1) + Variable(torch.zeros(xs + [nr_mix]).cuda(), requires_grad=False)
+    else:
+        x = x.unsqueeze(-1) + Variable(torch.zeros(xs + [nr_mix]), requires_grad=False)
 
     # means = torch.cat((means[:, :, :, 0, :].unsqueeze(3), m2, m3), dim=3)
     centered_x = x - means
@@ -261,6 +268,6 @@ def load_part_of_model(model, path):
                 model.state_dict()[name].copy_(param)
                 added += 1
             except Exception as e:
-                print e
+                print(e)
                 pass
     print('added %s of params:' % (added / float(len(model.state_dict().keys()))))

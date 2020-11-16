@@ -43,6 +43,8 @@ parser.add_argument('-x', '--max_epochs', type=int,
                     default=5000, help='How many epochs to run in total?')
 parser.add_argument('-s', '--seed', type=int, default=1,
                     help='Random seed to use')
+parser.add_argument('--cuda', action='store_true',
+                    help='use CUDA')
 args = parser.parse_args()
 
 # reproducibility
@@ -50,7 +52,7 @@ torch.manual_seed(args.seed)
 np.random.seed(args.seed)
 
 model_name = 'pcnn_lr:{:.5f}_nr-resnet{}_nr-filters{}'.format(args.lr, args.nr_resnet, args.nr_filters)
-assert not os.path.exists(os.path.join('runs', model_name)), '{} already exists!'.format(model_name)
+# assert not os.path.exists(os.path.join('runs', model_name)), '{} already exists!'.format(model_name)
 writer = SummaryWriter(log_dir=os.path.join('runs', model_name))
 
 sample_batch_size = 25
@@ -69,7 +71,7 @@ if 'mnist' in args.dataset :
     test_loader  = torch.utils.data.DataLoader(datasets.MNIST(args.data_dir, train=False, 
                     transform=ds_transforms), batch_size=args.batch_size, shuffle=True, **kwargs)
     
-    loss_op   = lambda real, fake : discretized_mix_logistic_loss_1d(real, fake)
+    loss_op   = lambda real, fake : discretized_mix_logistic_loss_1d(real, fake, args)
     sample_op = lambda x : sample_from_discretized_mix_logistic_1d(x, args.nr_logistic_mix)
 
 elif 'cifar' in args.dataset : 
@@ -79,14 +81,15 @@ elif 'cifar' in args.dataset :
     test_loader  = torch.utils.data.DataLoader(datasets.CIFAR10(args.data_dir, train=False, 
                     transform=ds_transforms), batch_size=args.batch_size, shuffle=True, **kwargs)
     
-    loss_op   = lambda real, fake : discretized_mix_logistic_loss(real, fake)
+    loss_op   = lambda real, fake : discretized_mix_logistic_loss(real, fake, args)
     sample_op = lambda x : sample_from_discretized_mix_logistic(x, args.nr_logistic_mix)
 else :
     raise Exception('{} dataset not in {mnist, cifar10}'.format(args.dataset))
 
 model = PixelCNN(nr_resnet=args.nr_resnet, nr_filters=args.nr_filters, 
             input_channels=input_channels, nr_logistic_mix=args.nr_logistic_mix)
-model = model.cuda()
+if(args.cuda):
+    model = model.cuda()
 
 if args.load_params:
     load_part_of_model(model, args.load_params)
@@ -99,7 +102,8 @@ scheduler = lr_scheduler.StepLR(optimizer, step_size=1, gamma=args.lr_decay)
 def sample(model):
     model.train(False)
     data = torch.zeros(sample_batch_size, obs[0], obs[1], obs[2])
-    data = data.cuda()
+    if(args.cuda):
+        data = data.cuda()
     for i in range(obs[1]):
         for j in range(obs[2]):
             data_v = Variable(data, volatile=True)
@@ -112,19 +116,21 @@ print('starting training')
 writes = 0
 for epoch in range(args.max_epochs):
     model.train(True)
-    torch.cuda.synchronize()
+    if(args.cuda):
+        torch.cuda.synchronize()
     train_loss = 0.
     time_ = time.time()
     model.train()
     for batch_idx, (input,_) in enumerate(train_loader):
-        input = input.cuda(async=True)
+        # if(args.cuda):
+        #     input = input.cuda(async=True)
         input = Variable(input)
         output = model(input)
         loss = loss_op(input, output)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        train_loss += loss.data[0]
+        train_loss += loss
         if (batch_idx +1) % args.print_every == 0 : 
             deno = args.print_every * args.batch_size * np.prod(obs) * np.log(2.)
             writer.add_scalar('train/bpd', (train_loss / deno), writes)
@@ -138,16 +144,17 @@ for epoch in range(args.max_epochs):
 
     # decrease learning rate
     scheduler.step()
-    
-    torch.cuda.synchronize()
+    if(args.cuda):
+        torch.cuda.synchronize()
     model.eval()
     test_loss = 0.
     for batch_idx, (input,_) in enumerate(test_loader):
-        input = input.cuda(async=True)
+        # if(args.cuda):
+        #     input = input.cuda(async=True)
         input_var = Variable(input)
         output = model(input_var)
         loss = loss_op(input_var, output)
-        test_loss += loss.data[0]
+        test_loss += loss
         del loss, output
 
     deno = batch_idx * args.batch_size * np.prod(obs) * np.log(2.)

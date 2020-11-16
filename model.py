@@ -146,7 +146,7 @@ class PixelCNN(nn.Module):
         x_out = self.nin_out(F.elu(ul))
 
         assert len(u_list) == len(ul_list) == 0, pdb.set_trace()
-
+        print("Model output : ", x_out.shape)
         return x_out
         
 
